@@ -1,4 +1,4 @@
-﻿package com.beerespect.game.render
+package com.beerespect.game.render
 
 import android.opengl.GLES30
 import android.opengl.GLSurfaceView

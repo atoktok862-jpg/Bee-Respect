@@ -4,6 +4,8 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import java.util.Collections
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.sin
 
 enum class Sfx { STING, POLLEN, DASH, EXPLODE, HIT, WAVE, ULT, CLICK, BOSS }
@@ -15,6 +17,8 @@ class SoundEngine {
     @Volatile private var enabled = true
     @Volatile private var engineActive = false
     private val effects = Collections.synchronizedList(ArrayList<Effect>())
+    private val startExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "BeeAudioStart").apply { isDaemon = true } }
+    private val startRequested = AtomicBoolean(false)
 
     private data class Effect(val kind: Sfx, var age: Float, val duration: Float, var phase: Float)
 
@@ -32,49 +36,54 @@ class SoundEngine {
     private var noiseSeed = 12345
 
     fun start() {
-        if (running) return
-        try {
-            val minBuffer = AudioTrack.getMinBufferSize(
-                sampleRate,
-                AudioFormat.CHANNEL_OUT_MONO,
-                AudioFormat.ENCODING_PCM_16BIT
-            )
-            if (minBuffer == AudioTrack.ERROR_BAD_VALUE || minBuffer == AudioTrack.ERROR) {
-                android.util.Log.w("BeeAudio", "AudioTrack не поддерживается: $minBuffer")
-                return
-            }
-            val bufferSize = maxOf(minBuffer, sampleRate / 2)
-            val audioTrack = AudioTrack.Builder()
-                .setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_GAME)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                        .build()
+        if (running || !startRequested.compareAndSet(false, true)) return
+        startExecutor.execute {
+            try {
+                if (running) return@execute
+                val minBuffer = AudioTrack.getMinBufferSize(
+                    sampleRate,
+                    AudioFormat.CHANNEL_OUT_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT
                 )
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(sampleRate)
-                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                        .build()
-                )
-                .setBufferSizeInBytes(bufferSize)
-                .setTransferMode(AudioTrack.MODE_STREAM)
-                .build()
-            if (audioTrack.state != AudioTrack.STATE_INITIALIZED) {
-                android.util.Log.w("BeeAudio", "AudioTrack не инициализирован")
-                audioTrack.release()
-                return
+                if (minBuffer == AudioTrack.ERROR_BAD_VALUE || minBuffer == AudioTrack.ERROR) {
+                    android.util.Log.w("BeeAudio", "AudioTrack не поддерживается: $minBuffer")
+                    return@execute
+                }
+                val bufferSize = maxOf(minBuffer, sampleRate / 2)
+                val audioTrack = AudioTrack.Builder()
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_GAME)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                            .build()
+                    )
+                    .setAudioFormat(
+                        AudioFormat.Builder()
+                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                            .setSampleRate(sampleRate)
+                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                            .build()
+                    )
+                    .setBufferSizeInBytes(bufferSize)
+                    .setTransferMode(AudioTrack.MODE_STREAM)
+                    .build()
+                if (audioTrack.state != AudioTrack.STATE_INITIALIZED) {
+                    android.util.Log.w("BeeAudio", "AudioTrack не инициализирован")
+                    audioTrack.release()
+                    return@execute
+                }
+                track = audioTrack
+                running = true
+                audioTrack.play()
+                worker = Thread({ mix(audioTrack) }, "BeeAudioMixer").apply { isDaemon = true; start() }
+            } catch (t: Throwable) {
+                android.util.Log.e("BeeAudio", "Ошибка запуска аудио", t)
+                running = false
+                try { track?.release() } catch (_: Throwable) {}
+                track = null
+            } finally {
+                startRequested.set(false)
             }
-            track = audioTrack
-            running = true
-            audioTrack.play()
-            worker = Thread({ mix(audioTrack) }, "BeeAudioMixer").apply { isDaemon = true; start() }
-        } catch (t: Throwable) {
-            android.util.Log.e("BeeAudio", "Ошибка запуска аудио", t)
-            running = false
-            try { track?.release() } catch (_: Throwable) {}
-            track = null
         }
     }
 
@@ -113,7 +122,7 @@ class SoundEngine {
 
     fun stop() {
         running = false
-        try { worker?.join(300) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+        worker?.interrupt()
         worker = null
         val current = track
         track = null
@@ -121,7 +130,7 @@ class SoundEngine {
             try {
                 it.stop()
                 it.release()
-            } catch (_: IllegalStateException) {
+            } catch (_: Throwable) {
             }
         }
         effects.clear()
@@ -134,7 +143,7 @@ class SoundEngine {
             if (!enabled) {
                 java.util.Arrays.fill(pcm, 0.toShort())
                 tryWrite(audioTrack, pcm)
-                Thread.sleep(8)
+                try { Thread.sleep(8) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); break }
                 continue
             }
             var index = 0
@@ -152,7 +161,7 @@ class SoundEngine {
             if (audioTrack.playState == AudioTrack.PLAYSTATE_PLAYING) {
                 audioTrack.write(pcm, 0, pcm.size)
             }
-        } catch (_: IllegalStateException) {
+        } catch (_: Throwable) {
         }
     }
 
@@ -176,15 +185,17 @@ class SoundEngine {
             value += sin(notePhase * 0.5f) * 0.035f * envelope
         }
 
-        val it = effects.iterator()
-        while (it.hasNext()) {
-            val effect = it.next()
-            effect.age += sampleDt
-            if (effect.age >= effect.duration) {
-                it.remove()
-                continue
+        synchronized(effects) {
+            val it = effects.iterator()
+            while (it.hasNext()) {
+                val effect = it.next()
+                effect.age += sampleDt
+                if (effect.age >= effect.duration) {
+                    it.remove()
+                    continue
+                }
+                value += effectSample(effect)
             }
-            value += effectSample(effect)
         }
         return value.coerceIn(-1f, 1f)
     }

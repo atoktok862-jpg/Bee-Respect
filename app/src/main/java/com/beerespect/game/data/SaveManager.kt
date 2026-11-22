@@ -1,4 +1,4 @@
-package com.beerespect.game.data
+﻿package com.beerespect.game.data
 
 import android.content.Context
 
@@ -60,10 +60,10 @@ class SaveManager(context: Context) {
     }
 
     fun skinRequirement(index: Int): String = when (index) {
-        0 -> "Доступна с самого начала"
-        1 -> "Нужно 120 мёда за все бои"
-        2 -> "Нужно 400 мёда за все бои"
-        3 -> "Нужно 900 мёда за все бои"
+        0 -> "Доступен с начала игры"
+        1 -> "Собери 120 мёда за всё время"
+        2 -> "Собери 400 мёда за всё время"
+        3 -> "Собери 900 мёда за всё время"
         else -> ""
     }
 

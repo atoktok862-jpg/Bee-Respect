@@ -159,8 +159,8 @@ class GameEngine(
     private var message = ""
     private var messageTimer = 0f
     private var particleCursor = 0
-    private var dashRequested = false
-    private var ultRequested = false
+    @Volatile private var dashRequested = false
+    @Volatile private var ultRequested = false
     private val lock = Any()
 
     fun startGame() {
@@ -273,53 +273,51 @@ class GameEngine(
         }
     }
 
-    fun requestDash() {
-        synchronized(lock) { dashRequested = true }
-    }
+    fun requestDash() { dashRequested = true }
 
-    fun requestUlt() {
-        synchronized(lock) { ultRequested = true }
-    }
+    fun requestUlt() { ultRequested = true }
 
     fun consumeShake(): Float {
-        val value = shakeRequest
-        shakeRequest = 0f
-        return value
+        synchronized(lock) {
+            val value = shakeRequest
+            shakeRequest = 0f
+            return value
+        }
     }
 
     fun isPlayable(): Boolean = state == GameState.PLAYING && !paused
 
     fun update(dt: Float) {
         val step = min(dt, 0.05f)
-        time += step
-        updateParticles(step)
-        updateFlowers(step)
-        if (messageTimer > 0f) messageTimer -= step
-        if (hitSoundTimer > 0f) hitSoundTimer -= step
-        if (!isPlayable()) {
+        synchronized(lock) {
+            time += step
+            updateParticles(step)
+            updateFlowers(step)
+            if (messageTimer > 0f) messageTimer -= step
+            if (hitSoundTimer > 0f) hitSoundTimer -= step
+            if (!isPlayable()) {
+                updateHud(step)
+                return
+            }
+            updatePlayer(step)
+            updateAllies(step)
+            updateSpawning(step)
+            updateEnemies(step)
+            updateBullets(step)
+            updatePickups(step)
+            updateUlt(step)
+            hiveHp = min(hiveMax, hiveHp + (0.9f + save.armor * 0.7f) * step)
+            updateWaveCompletion(step)
             updateHud(step)
-            return
         }
-        updatePlayer(step)
-        updateAllies(step)
-        updateSpawning(step)
-        updateEnemies(step)
-        updateBullets(step)
-        updatePickups(step)
-        updateUlt(step)
-        hiveHp = min(hiveMax, hiveHp + (0.9f + save.armor * 0.7f) * step)
-        updateWaveCompletion(step)
-        updateHud(step)
     }
 
     private fun updatePlayer(dt: Float) {
         val control = input
         var turn = false
         var dash = false
-        synchronized(lock) {
-            dash = dashRequested
-            dashRequested = false
-        }
+        dash = dashRequested
+        dashRequested = false
         if (dash && player.dashCd <= 0f) {
             player.dashTime = 0.45f
             player.dashCd = max(2.4f, 6.4f - save.turbo * 0.45f)
@@ -705,10 +703,8 @@ class GameEngine(
 
     private fun updateUlt(dt: Float) {
         var ult = false
-        synchronized(lock) {
-            ult = ultRequested
-            ultRequested = false
-        }
+        ult = ultRequested
+        ultRequested = false
         if (ult && ultCharge >= 100f) {
             ultCharge = 0f
             ultTime = 3.4f
@@ -732,7 +728,7 @@ class GameEngine(
                 8, 1.2f, 1f, 0.9f, 0.3f, 0.1f
             )
         }
-        enemies.removeAll { !it.alive }
+        if (enemies.any { !it.alive }) enemies.removeAll { !it.alive }
         hiveHp = min(hiveMax, hiveHp + 2f)
         burst(0f, 4f, 0f, 14, 1.6f, 1f, 0.85f, 0.3f, 0f)
     }
