@@ -1,4 +1,4 @@
-﻿package com.beerespect.game.ui
+package com.beerespect.game.ui
 
 import android.content.Context
 import android.graphics.*
@@ -15,7 +15,7 @@ import kotlin.math.min
 
 class HudOverlay @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null
-) : View(context, attrs) {
+) : View(context, attrs) {\n\n    init { setBackgroundColor(Color.TRANSPARENT) }
 
     interface Actions {
         fun onStart()

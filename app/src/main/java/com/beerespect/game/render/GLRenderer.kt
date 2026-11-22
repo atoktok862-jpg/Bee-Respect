@@ -1,6 +1,6 @@
 package com.beerespect.game.render
 
-import android.opengl.GLES30
+import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.util.Log
 import com.beerespect.game.GameEngine
@@ -17,7 +17,8 @@ import kotlin.math.sin
 
 class GLRenderer(
     val game: GameEngine,
-    private val onFatalError: ((Throwable) -> Unit)? = null
+    private val onFatalError: ((Throwable) -> Unit)? = null,
+    private val onFirstFrame: (() -> Unit)? = null
 ) : GLSurfaceView.Renderer {
     private var lastTime = 0L
     private var width = 1280
@@ -29,6 +30,7 @@ class GLRenderer(
     private val camera = Camera3D()
     @Volatile private var initialized = false
     @Volatile private var fatalReported = false
+    @Volatile private var firstFrameReported = false
 
     private val cloudPositions = arrayOf(
         floatArrayOf(-38f, 18f, -24f), floatArrayOf(36f, 20f, -18f),
@@ -39,13 +41,14 @@ class GLRenderer(
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         try {
             initialized = false
-            GLES30.glClearColor(0.52f, 0.79f, 0.93f, 1f)
-            GLES30.glEnable(GLES30.GL_DEPTH_TEST)
-            GLES30.glDepthFunc(GLES30.GL_LEQUAL)
-            GLES30.glEnable(GLES30.GL_BLEND)
-            GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
-            GLES30.glEnable(GLES30.GL_CULL_FACE)
-            GLES30.glCullFace(GLES30.GL_BACK)
+            firstFrameReported = false
+            GLES20.glClearColor(0.52f, 0.79f, 0.93f, 1f)
+            GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+            GLES20.glDepthFunc(GLES20.GL_LEQUAL)
+            GLES20.glEnable(GLES20.GL_BLEND)
+            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+            GLES20.glEnable(GLES20.GL_CULL_FACE)
+            GLES20.glCullFace(GLES20.GL_BACK)
 
             val program = ShaderProgram(VERTEX_SHADER, FRAGMENT_SHADER)
             program.build()
@@ -68,7 +71,7 @@ class GLRenderer(
             this.height = height
             val safeW = if (width > 0) width else 1
             val safeH = if (height > 0) height else 1
-            GLES30.glViewport(0, 0, safeW, safeH)
+            GLES20.glViewport(0, 0, safeW, safeH)
             camera.setAspect(safeW.toFloat() / safeH.toFloat().coerceAtLeast(1f))
         } catch (t: Throwable) {
             reportFatal(t)
@@ -97,7 +100,7 @@ class GLRenderer(
             val wantedTarget = Vec3(player.pos.x, player.pos.y * 0.55f + 2.5f, player.pos.z - 3f)
             camera.update(delta, wantedEye, wantedTarget)
 
-            GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
             program.use()
             program.setMat4("uViewProjection", camera.viewProjection)
             program.setVec3("uLightDir", 0.45f, 0.82f, 0.22f)
@@ -116,6 +119,11 @@ class GLRenderer(
             drawBullets(program, lib)
             drawParticles(program, lib)
             drawUltEffect(program, lib)
+
+            if (!firstFrameReported) {
+                firstFrameReported = true
+                onFirstFrame?.invoke()
+            }
         } catch (t: Throwable) {
             reportFatal(t)
         }
@@ -348,36 +356,33 @@ class GLRenderer(
 
     companion object {
         private const val VERTEX_SHADER = """
-#version 300 es
 precision highp float;
-layout(location = 0) in vec3 aPosition;
-layout(location = 1) in vec3 aNormal;
-layout(location = 2) in vec4 aColor;
+attribute vec3 aPosition;
+attribute vec3 aNormal;
+attribute vec4 aColor;
 uniform mat4 uModel;
 uniform mat4 uViewProjection;
-out vec3 vNormal;
-out vec3 vWorldPos;
-out vec4 vColor;
+varying vec3 vNormal;
+varying vec3 vWorldPos;
+varying vec4 vColor;
 void main() {
     vec4 world = uModel * vec4(aPosition, 1.0);
     vWorldPos = world.xyz;
-    vNormal = mat3(uModel) * aNormal;
+    vNormal = mat3(uModel[0].xyz, uModel[1].xyz, uModel[2].xyz) * aNormal;
     vColor = aColor;
     gl_Position = uViewProjection * world;
 }
 """
         private const val FRAGMENT_SHADER = """
-#version 300 es
 precision mediump float;
-in vec3 vNormal;
-in vec3 vWorldPos;
-in vec4 vColor;
+varying vec3 vNormal;
+varying vec3 vWorldPos;
+varying vec4 vColor;
 uniform vec3 uLightDir;
 uniform vec3 uLightColor;
 uniform vec3 uAmbient;
 uniform vec4 uColor;
 uniform float uEmissive;
-out vec4 fragColor;
 void main() {
     vec3 normal = normalize(vNormal);
     float diffuse = max(dot(normal, normalize(uLightDir)), 0.0);
@@ -386,7 +391,7 @@ void main() {
     float fog = smoothstep(20.0, 140.0, length(vWorldPos));
     vec3 fogColor = vec3(0.74, 0.86, 0.96);
     color = mix(color, fogColor, fog * 0.22);
-    fragColor = vec4(color, uColor.a * vColor.a);
+    gl_FragColor = vec4(color, uColor.a * vColor.a);
 }
 """
     }
