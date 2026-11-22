@@ -293,6 +293,33 @@ class GLRenderer(val game: GameEngine) : GLSurfaceView.Renderer {
         mesh.draw()
     }
 
+    private fun drawMesh(
+        model: com.beerespect.game.models.Model,
+        px: Float, py: Float, pz: Float,
+        sx: Float, sy: Float, sz: Float,
+        alpha: Float,
+        rx: Float, ry: Float, rz: Float,
+        r: Float, g: Float, b: Float,
+        a: Float,
+        emissive: Float
+    ) {
+        for (part in model.parts) {
+            val tinted = floatArrayOf(
+                part.color[0] * r,
+                part.color[1] * g,
+                part.color[2] * b,
+                part.color[3]
+            )
+            drawPart(
+                part.mesh, tinted,
+                px + part.px, py + part.py, pz + part.pz,
+                sx * part.sx, sy * part.sy, sz * part.sz,
+                rx + part.rx, ry + part.ry, rz + part.rz,
+                part.alpha * alpha * a, maxOf(part.emissive, emissive), part.anim, 0f
+            )
+        }
+    }
+
     companion object {
         private const val VERTEX_SHADER = """
 attribute vec3 aPosition;

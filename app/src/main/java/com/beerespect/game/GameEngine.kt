@@ -97,11 +97,11 @@ class Bullet(
 
 class Pollen(val pos: Vec3, val vel: Vec3, var life: Float, var phase: Float)
 
-class Flower(val x: Float, val z: Float, val phase: Float) {
+class Flower(val x: Float, val z: Float, var phase: Float) {
     var bloom = 0f
 }
 
-class Crystal(val x: Float, val y: Float, val z: Float, val phase: Float) {
+class Crystal(val x: Float, val y: Float, val z: Float, var phase: Float) {
     var cooldown = 0f
 }
 

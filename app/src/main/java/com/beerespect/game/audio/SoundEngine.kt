@@ -142,7 +142,7 @@ class SoundEngine {
     private fun mixSample(): Float {
         var value = 0f
         val hum = if (engineActive) 0.035f else 0.014f
-        enginePhase += 2f * kotlin.math.PI * 108f / sampleRate
+        enginePhase += (2.0 * kotlin.math.PI * 108.0 / sampleRate.toDouble()).toFloat()
         value += (sin(enginePhase) * 0.7f + sin(enginePhase * 2.01f) * 0.3f) * hum
 
         melodyTimer += sampleDt
@@ -151,8 +151,8 @@ class SoundEngine {
             melodyIndex = (melodyIndex + 1) % melody.size
         }
         val midi = melody[melodyIndex]
-        val freq = 440f * Math.pow(2.0, (midi - 69) / 12.0).toFloat()
-        val notePhase = (melodyTimer / 0.26f) * 2f * kotlin.math.PI * freq
+        val freq = (440.0 * Math.pow(2.0, (midi - 69) / 12.0)).toFloat()
+        val notePhase = ((melodyTimer / 0.26f) * 2.0 * kotlin.math.PI * freq.toDouble()).toFloat()
         val envelope = 1f - melodyTimer / 0.26f
         value += sin(notePhase) * 0.03f * envelope
         if (melodyIndex % 4 == 0) {
@@ -175,8 +175,8 @@ class SoundEngine {
     private fun effectSample(e: Effect): Float {
         val t = e.age
         val d = e.duration
-        val phase = 2f * kotlin.math.PI * t
-        return when (e.kind) {
+        val phase = (2.0 * kotlin.math.PI * t.toDouble()).toFloat()
+        val sample: Float = when (e.kind) {
             Sfx.STING -> sin(phase * (950f - t * 2200f)) * (1f - t / d) * 0.38f
             Sfx.POLLEN -> (sin(phase * 1320f) + sin(phase * 1980f) * 0.5f) * (1f - t / d) * 0.25f
             Sfx.DASH -> (sin(phase * (260f + t * 1400f)) + noise() * 0.25f) * (1f - t / d) * 0.3f
@@ -185,12 +185,14 @@ class SoundEngine {
             Sfx.WAVE -> {
                 val notes = floatArrayOf(523f, 659f, 784f, 1046f)
                 val step = (t / d * 4f).toInt().coerceIn(0, 3)
-                sin(2f * kotlin.math.PI * notes[step] * t) * (1f - t / d) * 0.28f
+                val wavePhase = (2.0 * kotlin.math.PI * notes[step].toDouble() * t.toDouble()).toFloat()
+                sin(wavePhase) * (1f - t / d) * 0.28f
             }
             Sfx.ULT -> (sin(phase * (180f + t * 900f)) + noise() * 0.4f) * (1f - t / d) * 0.42f
             Sfx.CLICK -> sin(phase * 780f) * (1f - t / d) * 0.22f
             Sfx.BOSS -> (sin(phase * 82f) + sin(phase * 123f)) * (1f - t / d) * 0.3f
         }
+        return sample
     }
 
     private fun noise(): Float {
