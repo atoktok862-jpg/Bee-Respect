@@ -15,7 +15,11 @@ import kotlin.math.min
 
 class HudOverlay @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null
-) : View(context, attrs) {\n\n    init { setBackgroundColor(Color.TRANSPARENT) }
+) : View(context, attrs) {
+
+    init {
+        setBackgroundColor(Color.TRANSPARENT)
+    }
 
     interface Actions {
         fun onStart()
