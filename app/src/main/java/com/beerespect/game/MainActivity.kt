@@ -1,78 +1,232 @@
-package com.beerespect.game
+﻿package com.beerespect.game
 
 import android.app.Activity
+import android.app.ActivityManager
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.graphics.Color
+import android.graphics.Typeface
 import android.opengl.GLSurfaceView
 import android.os.Bundle
+import android.util.Log
+import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import android.widget.Toast
 import com.beerespect.game.audio.Sfx
 import com.beerespect.game.audio.SoundEngine
 import com.beerespect.game.data.SaveManager
 import com.beerespect.game.render.GLRenderer
 import com.beerespect.game.ui.HudOverlay
+import java.io.PrintWriter
+import java.io.StringWriter
 
 class MainActivity : Activity(), GameEngine.Listener, HudOverlay.Actions {
 
-    private lateinit var glView: GLSurfaceView
+    private var glView: GLSurfaceView? = null
     private lateinit var overlay: HudOverlay
     private lateinit var engine: GameEngine
     private lateinit var sound: SoundEngine
     private lateinit var save: SaveManager
     private var renderer: GLRenderer? = null
+    @Volatile private var fatalShown = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installCrashHandler()
         super.onCreate(savedInstanceState)
-        hideSystemUi()
+        try {
+            hideSystemUi()
 
-        sound = SoundEngine()
-        save = SaveManager(this)
-        engine = GameEngine(sound, save)
-        engine.listener = this
-        sound.setEnabled(save.soundEnabled)
+            sound = SoundEngine()
+            save = SaveManager(this)
+            engine = GameEngine(sound, save)
+            engine.listener = this
+            sound.setEnabled(save.soundEnabled)
 
-        glView = GLSurfaceView(this)
-        glView.setEGLContextClientVersion(3)
-        glView.preserveEGLContextOnPause = true
-        val glRenderer = GLRenderer(engine)
-        renderer = glRenderer
-        glView.setRenderer(glRenderer)
-        glView.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
+            overlay = HudOverlay(this)
+            overlay.engine = engine
+            overlay.save = save
+            overlay.actions = this
 
-        overlay = HudOverlay(this)
-        overlay.engine = engine
-        overlay.save = save
-        overlay.actions = this
+            val root = FrameLayout(this)
+            root.setBackgroundColor(Color.parseColor("#88CEF0"))
 
-        val root = FrameLayout(this)
-        root.addView(glView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-        root.addView(overlay, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-        setContentView(root)
+            val surface = createGlSurface()
+            glView = surface
+            if (surface != null) {
+                root.addView(surface, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            } else {
+                root.addView(createGlFallbackView(), FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            }
+            root.addView(overlay, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            setContentView(root)
+        } catch (t: Throwable) {
+            showFatalError(t)
+        }
     }
+
+    private fun installCrashHandler() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            val trace = buildTrace(thread.name, throwable)
+            Log.e("BeeCrash", trace, throwable)
+            if (!fatalShown) {
+                fatalShown = true
+                runOnUiThread {
+                    try {
+                        showFatalError(trace)
+                    } catch (_: Throwable) {
+                        previous?.uncaughtException(thread, throwable)
+                    }
+                }
+            } else {
+                previous?.uncaughtException(thread, throwable)
+            }
+        }
+    }
+
+    private fun createGlSurface(): GLSurfaceView? {
+        return try {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val glEsVersion = am.deviceConfigurationInfo.glEsVersion
+            val major = glEsVersion.substringBefore('.').toIntOrNull() ?: 2
+            val surface = GLSurfaceView(this)
+            if (major >= 3) {
+                surface.setEGLContextClientVersion(3)
+            } else {
+                Log.e("BeeGL", "OpenGL ES 3.0 не поддерживается: $glEsVersion")
+                showFatalError(RuntimeException("Устройство не поддерживает OpenGL ES 3.0 (обнаружено: $glEsVersion). Для игры требуется OpenGL ES 3.0."))
+                return null
+            }
+            surface.preserveEGLContextOnPause = true
+            val glRenderer = GLRenderer(engine) { t -> showFatalError(t) }
+            renderer = glRenderer
+            surface.setRenderer(glRenderer)
+            surface.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
+            surface
+        } catch (t: Throwable) {
+            Log.e("BeeGL", "Не удалось создать GLSurfaceView", t)
+            showFatalError(t)
+            null
+        }
+    }
+
+    private fun createGlFallbackView(): View {
+        return TextView(this).apply {
+            text = "Не удалось запустить 3D-рендер на этом устройстве."
+            setTextColor(Color.WHITE)
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setBackgroundColor(Color.parseColor("#33442200"))
+        }
+    }
+
+    private fun buildTrace(threadName: String, throwable: Throwable): String {
+        val sw = StringWriter()
+        throwable.printStackTrace(PrintWriter(sw))
+        return "Поток: $threadName\n\n$sw"
+    }
+
+    private fun showFatalError(throwable: Throwable) {
+        showFatalError(buildTrace(Thread.currentThread().name, throwable))
+    }
+
+    @Synchronized
+    private fun showFatalError(trace: String) {
+        if (isFinishing || isDestroyed) return
+        runOnUiThread {
+            try {
+                try { glView?.renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY } catch (_: Throwable) {}
+                try { glView?.onPause() } catch (_: Throwable) {}
+                if (::sound.isInitialized) {
+                    try { sound.stop() } catch (_: Throwable) {}
+                }
+                val root = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setBackgroundColor(Color.parseColor("#1A1208"))
+                    setPadding(dp(16), dp(16), dp(16), dp(16))
+                }
+                val title = TextView(this).apply {
+                    text = "Ошибка запуска"
+                    setTextColor(Color.parseColor("#FFD24A"))
+                    textSize = 22f
+                    typeface = Typeface.DEFAULT_BOLD
+                }
+                val hint = TextView(this).apply {
+                    text = "Приложение перехватило сбой. Скопируйте текст ошибки."
+                    setTextColor(Color.WHITE)
+                    textSize = 14f
+                    setPadding(0, dp(8), 0, dp(12))
+                }
+                val copy = Button(this).apply {
+                    text = "Скопировать ошибку"
+                    setOnClickListener {
+                        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("crash", trace))
+                        Toast.makeText(this@MainActivity, "Текст ошибки скопирован", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                val text = TextView(this).apply {
+                    this.text = trace
+                    setTextColor(Color.parseColor("#FFF3D6"))
+                    textSize = 12f
+                    typeface = Typeface.MONOSPACE
+                    setTextIsSelectable(true)
+                }
+                val scroll = ScrollView(this).apply {
+                    addView(text)
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+                }
+                root.addView(title)
+                root.addView(hint)
+                root.addView(copy)
+                root.addView(scroll)
+                setContentView(root)
+            } catch (e: Throwable) {
+                Log.e("BeeCrash", "Не удалось показать экран ошибки", e)
+            }
+        }
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     override fun onResume() {
         super.onResume()
         hideSystemUi()
-        glView.onResume()
-        sound.start()
-        sound.setEnabled(save.soundEnabled)
-        if (engine.state == GameState.PLAYING) sound.resume() else sound.pause()
+        try { glView?.onResume() } catch (t: Throwable) { showFatalError(t) }
+        if (::sound.isInitialized) {
+            sound.start()
+            if (::save.isInitialized) sound.setEnabled(save.soundEnabled)
+            if (::engine.isInitialized && engine.state == GameState.PLAYING) sound.resume() else sound.pause()
+        }
     }
 
     override fun onPause() {
-        if (engine.state == GameState.PLAYING) {
+        if (::engine.isInitialized && engine.state == GameState.PLAYING) {
             engine.pauseGame()
-            overlay.resetJoystick()
+            if (::overlay.isInitialized) overlay.resetJoystick()
         }
-        sound.pause()
-        glView.onPause()
+        if (::sound.isInitialized) sound.pause()
+        try { glView?.onPause() } catch (_: Throwable) {}
         super.onPause()
     }
 
     override fun onDestroy() {
-        glView.queueEvent { renderer?.models?.dispose() }
-        sound.stop()
+        try {
+            glView?.queueEvent {
+                try { renderer?.dispose() } catch (_: Throwable) {}
+            }
+        } catch (_: Throwable) {}
+        if (::sound.isInitialized) {
+            try { sound.stop() } catch (_: Throwable) {}
+        }
         super.onDestroy()
     }
 
@@ -100,11 +254,11 @@ class MainActivity : Activity(), GameEngine.Listener, HudOverlay.Actions {
     }
 
     override fun onWaveCleared(wave: Int, bonus: Int) {
-        runOnUiThread { overlay.hud = overlay.hud.copy(message = "Волна $wave зачищена! +$bonus мёда") }
+        runOnUiThread { if (::overlay.isInitialized) overlay.hud = overlay.hud.copy(message = "Волна $wave зачищена! +$bonus мёда") }
     }
 
     override fun onGameOver(score: Int, wave: Int) {
-        runOnUiThread { overlay.hud = overlay.hud.copy(message = "Улей пал на волне $wave") }
+        runOnUiThread { if (::overlay.isInitialized) overlay.hud = overlay.hud.copy(message = "Улей пал на волне $wave") }
     }
 
     override fun onHud(state: com.beerespect.game.HudState) {

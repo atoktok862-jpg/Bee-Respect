@@ -1,4 +1,4 @@
-package com.beerespect.game.core
+﻿package com.beerespect.game.core
 
 import android.opengl.GLES30
 import android.util.Log
@@ -49,7 +49,7 @@ class ShaderProgram(vsText: String, fsText: String) {
     }
 
     fun use() {
-        GLES30.glUseProgram(programId)
+        if (programId != 0) GLES30.glUseProgram(programId)
     }
 
     private fun location(name: String): Int {
@@ -61,19 +61,23 @@ class ShaderProgram(vsText: String, fsText: String) {
     }
 
     fun setMat4(name: String, value: FloatArray) {
-        GLES30.glUniformMatrix4fv(location(name), 1, false, value, 0)
+        val loc = location(name)
+        if (loc >= 0) GLES30.glUniformMatrix4fv(loc, 1, false, value, 0)
     }
 
     fun setFloat(name: String, value: Float) {
-        GLES30.glUniform1f(location(name), value)
+        val loc = location(name)
+        if (loc >= 0) GLES30.glUniform1f(loc, value)
     }
 
     fun setVec3(name: String, x: Float, y: Float, z: Float) {
-        GLES30.glUniform3f(location(name), x, y, z)
+        val loc = location(name)
+        if (loc >= 0) GLES30.glUniform3f(loc, x, y, z)
     }
 
     fun setVec4(name: String, x: Float, y: Float, z: Float, w: Float) {
-        GLES30.glUniform4f(location(name), x, y, z, w)
+        val loc = location(name)
+        if (loc >= 0) GLES30.glUniform4f(loc, x, y, z, w)
     }
 
     fun dispose() {

@@ -33,32 +33,49 @@ class SoundEngine {
 
     fun start() {
         if (running) return
-        val bufferSize = AudioTrack.getMinBufferSize(
-            sampleRate,
-            AudioFormat.CHANNEL_OUT_MONO,
-            AudioFormat.ENCODING_PCM_16BIT
-        ).coerceAtLeast(sampleRate / 4)
-        val audioTrack = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_GAME)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
+        try {
+            val minBuffer = AudioTrack.getMinBufferSize(
+                sampleRate,
+                AudioFormat.CHANNEL_OUT_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
             )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .build()
-            )
-            .setBufferSizeInBytes(bufferSize)
-            .setTransferMode(AudioTrack.MODE_STREAM)
-            .build()
-        track = audioTrack
-        running = true
-        audioTrack.play()
-        worker = Thread({ mix(audioTrack) }, "BeeAudioMixer").apply { isDaemon = true; start() }
+            if (minBuffer == AudioTrack.ERROR_BAD_VALUE || minBuffer == AudioTrack.ERROR) {
+                android.util.Log.w("BeeAudio", "AudioTrack не поддерживается: $minBuffer")
+                return
+            }
+            val bufferSize = maxOf(minBuffer, sampleRate / 2)
+            val audioTrack = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_GAME)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(bufferSize)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
+            if (audioTrack.state != AudioTrack.STATE_INITIALIZED) {
+                android.util.Log.w("BeeAudio", "AudioTrack не инициализирован")
+                audioTrack.release()
+                return
+            }
+            track = audioTrack
+            running = true
+            audioTrack.play()
+            worker = Thread({ mix(audioTrack) }, "BeeAudioMixer").apply { isDaemon = true; start() }
+        } catch (t: Throwable) {
+            android.util.Log.e("BeeAudio", "Ошибка запуска аудио", t)
+            running = false
+            try { track?.release() } catch (_: Throwable) {}
+            track = null
+        }
     }
 
     fun setEnabled(value: Boolean) {
@@ -87,11 +104,11 @@ class SoundEngine {
     }
 
     fun pause() {
-        track?.pause()
+        try { track?.pause() } catch (_: Throwable) {}
     }
 
     fun resume() {
-        if (running) track?.play()
+        try { if (running) track?.play() } catch (_: Throwable) {}
     }
 
     fun stop() {

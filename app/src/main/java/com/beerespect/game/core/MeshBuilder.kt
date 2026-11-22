@@ -19,6 +19,7 @@ class Mesh(private val geometry: Geometry) {
 
     fun upload() {
         if (vao != 0) return
+        if (geometry.vertices.isEmpty() || geometry.indices.isEmpty()) return
         val arrays = IntArray(1)
         GLES30.glGenVertexArrays(1, arrays, 0)
         vao = arrays[0]
@@ -29,12 +30,15 @@ class Mesh(private val geometry: Geometry) {
 
         GLES30.glBindVertexArray(vao)
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vbo)
+        val vertexBuffer = java.nio.ByteBuffer.allocateDirect(geometry.vertices.size * 4)
+            .order(java.nio.ByteOrder.nativeOrder())
+            .asFloatBuffer()
+        vertexBuffer.put(geometry.vertices)
+        vertexBuffer.position(0)
         GLES30.glBufferData(
             GLES30.GL_ARRAY_BUFFER,
             geometry.vertices.size * 4,
-            java.nio.ByteBuffer.allocateDirect(geometry.vertices.size * 4)
-                .order(java.nio.ByteOrder.nativeOrder())
-                .asFloatBuffer().put(geometry.vertices).position(0) as java.nio.Buffer,
+            vertexBuffer,
             GLES30.GL_STATIC_DRAW
         )
         val stride = 10 * 4
@@ -46,20 +50,26 @@ class Mesh(private val geometry: Geometry) {
         GLES30.glVertexAttribPointer(2, 4, GLES30.GL_FLOAT, false, stride, 6 * 4)
 
         GLES30.glBindBuffer(GLES30.GL_ELEMENT_ARRAY_BUFFER, ebo)
+        val indexBuffer = java.nio.ByteBuffer.allocateDirect(geometry.indices.size * 4)
+            .order(java.nio.ByteOrder.nativeOrder())
+            .asIntBuffer()
+        indexBuffer.put(geometry.indices)
+        indexBuffer.position(0)
         GLES30.glBufferData(
             GLES30.GL_ELEMENT_ARRAY_BUFFER,
             geometry.indices.size * 4,
-            java.nio.ByteBuffer.allocateDirect(geometry.indices.size * 4)
-                .order(java.nio.ByteOrder.nativeOrder())
-                .asIntBuffer().put(geometry.indices).position(0) as java.nio.Buffer,
+            indexBuffer,
             GLES30.GL_STATIC_DRAW
         )
         GLES30.glBindVertexArray(0)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
     }
 
     fun draw() {
+        if (vao == 0 || indexCount <= 0) return
         GLES30.glBindVertexArray(vao)
         GLES30.glDrawElements(GLES30.GL_TRIANGLES, indexCount, GLES30.GL_UNSIGNED_INT, 0)
+        GLES30.glBindVertexArray(0)
     }
 
     fun dispose() {
